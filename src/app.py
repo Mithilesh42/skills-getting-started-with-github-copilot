@@ -7,7 +7,7 @@ for extracurricular activities at Mergington High School.
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 import os
 from pathlib import Path
 
@@ -16,8 +16,15 @@ app = FastAPI(title="Mergington High School API",
 
 # Mount the static files directory
 current_dir = Path(__file__).parent
-app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
-          "static")), name="static")
+static_files = StaticFiles(directory=os.path.join(Path(__file__).parent, "static"))
+
+# Set up root redirect with high priority
+@app.get("/", include_in_schema=True)
+async def root():
+    return RedirectResponse(url="/static/index.html", status_code=307)
+
+# Mount static files after root route is defined
+app.mount("/static", static_files, name="static")
 
 # In-memory activity database
 activities = {
@@ -80,12 +87,14 @@ activities = {
 
 @app.get("/")
 def root():
-    return RedirectResponse(url="/static/index.html")
+    return RedirectResponse(url="/static/index.html", status_code=307)
 
 
 @app.get("/activities")
 def get_activities():
     return activities
+
+@app.get("/activities")
 
 
 @app.post("/activities/{activity_name}/signup")
@@ -93,14 +102,51 @@ def signup_for_activity(activity_name: str, email: str):
     """Sign up a student for an activity"""
     # Validate activity exists
     if activity_name not in activities:
-        raise HTTPException(status_code=404, detail="Activity not found")
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Activity not found"}
+        )
+
+    # Get the specific activity
+    activity = activities[activity_name]
+    
+    # Validate student is not already signed up
+    if email in activity["participants"]:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Student already signed up for this activity"}
+        )
+
+    # Add student
+    activity["participants"].append(email)
+    return JSONResponse(
+        status_code=200,
+        content={"message": f"Signed up {email} for {activity_name}"}
+    )
+    
+@app.delete("/activities/{activity_name}/participant/{email}")
+def unregister_participant(activity_name: str, email: str):
+    """Unregister a participant from an activity"""
+    # Validate activity exists
+    if activity_name not in activities:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Activity not found"}
+        )
 
     # Get the specific activity
     activity = activities[activity_name]
 
-    # Validate student is not already signed up
-    if email in activity["participants"]:
-        raise HTTPException(status_code=400, detail="Student already signed up for this activity")
-    # Add student
-    activity["participants"].append(email)
-    return {"message": f"Signed up {email} for {activity_name}"}
+    # Validate participant is registered
+    if email not in activity["participants"]:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Participant not found"}
+        )
+
+    # Remove participant
+    activity["participants"].remove(email)
+    return JSONResponse(
+        status_code=200,
+        content={"message": f"Removed {email} from {activity_name}"}
+    )
